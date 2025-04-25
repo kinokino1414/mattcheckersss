@@ -1,0 +1,259 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="quiz-creator-card">
+        <div class="quiz-header">
+            <h2><i class="fas fa-edit me-2"></i>Create New Quiz</h2>
+            <p class="text-muted">Design your quiz with an easy-to-use interface</p>
+        </div>
+
+        <form method="POST" class="quiz-form">
+            <div class="form-section">
+                <label for="title" class="form-label">Quiz Title</label>
+                <input type="text" class="form-control custom-input" id="title" name="title" required 
+                       placeholder="Enter quiz title">
+            </div>
+            
+            <div class="form-section">
+                <label for="num_items" class="form-label">Number of Items</label>
+                <select class="form-select custom-select" id="num_items" name="num_items" required>
+                    <option value="20">20 Items</option>
+                    <option value="50">50 Items</option>
+                    <option value="100">100 Items</option>
+                </select>
+            </div>
+
+            <div class="form-section">
+                <label class="form-label">Answer Key</label>
+                <div class="answer-key-container">
+                    <div id="answerGrid" class="answer-grid"></div>
+                    <input type="hidden" id="answer_key" name="answer_key" required>
+                    <button type="button" class="btn btn-secondary generate-btn" id="generateKey">
+                        <i class="fas fa-random me-2"></i>Generate Random
+                    </button>
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary create-btn">
+                    <i class="fas fa-check me-2"></i>Create Quiz
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.quiz-creator-card {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    padding: 2rem;
+    margin-bottom: 2rem;
+}
+
+.quiz-header {
+    margin-bottom: 2rem;
+    text-align: center;
+}
+
+.quiz-header h2 {
+    color: #2c3e50;
+    margin-bottom: 0.5rem;
+}
+
+.form-section {
+    margin-bottom: 1.5rem;
+}
+
+.form-label {
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 0.5rem;
+}
+
+.custom-input, .custom-select {
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    padding: 0.75rem;
+    transition: all 0.3s ease;
+}
+
+.custom-input:focus, .custom-select:focus {
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.answer-key-container {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 1.5rem;
+}
+
+.answer-grid {
+    display: grid;
+    grid-template-columns: 50px repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.question-row {
+    display: contents;
+}
+
+.question-number {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    font-weight: 600;
+    color: #495057;
+    padding-right: 10px;
+}
+
+.answer-options {
+    display: grid;
+    grid-template-columns: repeat(4, 40px);
+    gap: 1rem;
+    grid-column: span 4;
+    justify-content: start;
+}
+
+.answer-option {
+    width: 40px;
+    height: 40px;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+
+.answer-option:hover {
+    background: #e9ecef;
+    border-color: #ced4da;
+}
+
+.answer-option.selected {
+    background: #007bff;
+    color: white;
+    border-color: #0056b3;
+}
+
+.generate-btn {
+    width: 100%;
+    padding: 0.75rem;
+    border-radius: 8px;
+    background: #6c757d;
+    border: none;
+    transition: all 0.3s ease;
+}
+
+.generate-btn:hover {
+    background: #5a6268;
+}
+
+.form-actions {
+    margin-top: 2rem;
+    text-align: center;
+}
+
+.create-btn {
+    padding: 0.75rem 2rem;
+    font-size: 1.1rem;
+    border-radius: 8px;
+    background: #28a745;
+    border: none;
+    transition: all 0.3s ease;
+}
+
+.create-btn:hover {
+    background: #218838;
+    transform: translateY(-1px);
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const numItemsSelect = document.getElementById('num_items');
+    const answerGrid = document.getElementById('answerGrid');
+    const answerKeyInput = document.getElementById('answer_key');
+    
+    function updateAnswerGrid() {
+        const numItems = parseInt(numItemsSelect.value);
+        answerGrid.innerHTML = '';
+        let currentAnswerKey = answerKeyInput.value.split('') || [];
+        
+        for (let i = 1; i <= numItems; i++) {
+            const questionRow = document.createElement('div');
+            questionRow.className = 'question-row';
+            
+            const numberCell = document.createElement('div');
+            numberCell.className = 'question-number';
+            numberCell.textContent = i + '.';
+            questionRow.appendChild(numberCell);
+            
+            const optionsCell = document.createElement('div');
+            optionsCell.className = 'answer-options';
+            optionsCell.setAttribute('data-question', i);
+            
+            ['A', 'B', 'C', 'D'].forEach(option => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'answer-option' + 
+                    (currentAnswerKey[i-1] === option ? ' selected' : '');
+                btn.textContent = option;
+                btn.onclick = function() {
+                    optionsCell.querySelectorAll('.answer-option').forEach(b => {
+                        b.classList.remove('selected');
+                    });
+                    btn.classList.add('selected');
+                    updateAnswerKey();
+                };
+                optionsCell.appendChild(btn);
+            });
+            
+            questionRow.appendChild(optionsCell);
+            answerGrid.appendChild(questionRow);
+        }
+        updateAnswerKey();
+    }
+    
+    function updateAnswerKey() {
+        const answers = [];
+        answerGrid.querySelectorAll('.answer-options').forEach(question => {
+            const selected = question.querySelector('.selected');
+            answers.push(selected ? selected.textContent : 'A');
+        });
+        answerKeyInput.value = answers.join('');
+    }
+    
+    numItemsSelect.addEventListener('change', updateAnswerGrid);
+    
+    document.getElementById('generateKey').addEventListener('click', function() {
+        const numItems = parseInt(numItemsSelect.value);
+        fetch('/quiz/generate_key', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({num_items: numItems})
+        })
+        .then(response => response.json())
+        .then(data => {
+            answerKeyInput.value = data.answer_key;
+            updateAnswerGrid();
+        });
+    });
+    
+    // Initial grid setup
+    updateAnswerGrid();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,39 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Quizzes</h2>
+    <a href="{{ url_for('create_quiz') }}" class="btn btn-primary mb-3">Create New Quiz</a>
+    
+    <div class="table-responsive">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Items</th>
+                    <th>Answer Key</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for quiz in quizzes %}
+                <tr>
+                    <td>{{ quiz.title }}</td>
+                    <td>{{ quiz.num_items }}</td>
+                    <td><code>{{ quiz.answer_key }}</code></td>
+                    <td>{{ quiz.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        <a href="{{ url_for('download_template', template_type='standard_20' if quiz.num_items == 20 else 'extended_50' if quiz.num_items == 50 else 'comprehensive_100') }}" 
+                           class="btn btn-sm btn-primary">
+                           <i class="fas fa-download"></i> Template
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

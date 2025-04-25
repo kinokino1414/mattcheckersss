@@ -1,0 +1,129 @@
+/* Global Styles */
+body {
+    background-color: #f8f9fa;
+}
+
+.separator-with-text {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    margin: 15px 0;
+}
+
+.separator-with-text::before,
+.separator-with-text::after {
+    content: "";
+    flex: 1;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.separator-with-text span {
+    padding: 0 10px;
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+/* Upload Area Styles */
+.upload-area {
+    border: 2px dashed #dee2e6;
+    border-radius: 8px;
+    padding: 30px;
+    text-align: center;
+    margin-bottom: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.upload-area:hover {
+    border-color: #6c757d;
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* Preview Styles */
+#previewContainer {
+    margin-top: 20px;
+}
+
+.preview-image {
+    max-width: 100%;
+    max-height: 300px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Results Styles */
+.answer-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+}
+
+.answer-item {
+    padding: 10px;
+    border-radius: 6px;
+    text-align: center;
+}
+
+.correct {
+    background-color: rgba(25, 135, 84, 0.1);
+    border: 1px solid rgba(25, 135, 84, 0.2);
+}
+
+.incorrect {
+    background-color: rgba(220, 53, 69, 0.1);
+    border: 1px solid rgba(220, 53, 69, 0.2);
+}
+
+/* Camera Styles */
+.camera-preview {
+    position: relative;
+    max-width: 640px;
+    margin: 0 auto;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.camera-preview video {
+    width: 100%;
+    max-height: 480px;
+    background-color: #000;
+    border-radius: 8px;
+}
+
+.camera-controls {
+    margin: 20px 0;
+}
+
+.camera-controls .btn {
+    margin: 0 5px;
+}
+
+#capturedImage {
+    max-width: 100%;
+    max-height: 400px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+}
+
+#canvas {
+    display: none;
+}
+
+/* Camera instructions */
+.camera-tips li {
+    margin-bottom: 10px;
+}
+
+.navbar {
+    background-color: #0d6efd !important;
+}
+
+.btn-primary {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+.btn-primary:hover {
+    background-color: #0b5ed7;
+    border-color: #0b5ed7;
+}

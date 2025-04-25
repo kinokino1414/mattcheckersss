@@ -1,0 +1,358 @@
+    import os
+
+    from datetime import datetime
+    import cv2
+    import numpy as np
+    from flask import Flask, request, jsonify, render_template
+    from imutils.perspective import four_point_transform
+    from imutils import contours as imutils_contours
+    import mysql.connector
+    from easyocr import Reader
+    from werkzeug.utils import secure_filename
+    from pdf2image import convert_from_path
+    import fitz  # PyMuPDF (fallback library)
+
+    app = Flask(__name__)
+    app.config['SECRET_KEY'] = 'your_secret_key'
+    UPLOAD_FOLDER = 'uploads'
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf'}
+    app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+    # Initialize OCR Reader
+    reader = Reader(['en'])
+
+    class BubbleSheetScanner:
+        def __init__(self):
+            self.templates = {
+                'template1': {
+                    'identifier': 'EXAM ANSWER SHEET',
+                    'marker_size': 0.05,
+                    'name_field': {'y_start': 0.05, 'y_end': 0.10, 'x_start': 0.2, 'x_end': 0.8},
+                    'id_field': {'y_start': 0.12, 'y_end': 0.18, 'x_start': 0.2, 'x_end': 0.8},
+                    'answer_fields': {
+                        'columns': 1,
+                        'questions_per_column': 20,
+                        'choices': ['A', 'B', 'C', 'D'],
+                        'bubble_spacing': 0.05,
+                        'first_question_offset': 0.25,
+                        'bubble_width': 0.06
+                    },
+                    'processing': {
+                        'blur_kernel': (5, 5),
+                        'canny_thresholds': (50, 150),
+                        'min_contour_area': 500,
+                        'bubble_fill_threshold': 0.4
+                    }
+                },
+                'template2': {
+                    'identifier': '# EXAM ANSWER SHEET',
+                    'marker_size': 0.06,
+                    'name_field': {'y_start': 0.08, 'y_end': 0.14, 'x_start': 0.2, 'x_end': 0.8},
+                    'answer_fields': {
+                        'columns': 1,
+                        'questions_per_column': 20,
+                        'choices': ['A', 'B', 'C', 'D'],
+                        'bubble_spacing': 0.055,
+                        'first_question_offset': 0.20,
+                        'bubble_width': 0.07
+                    },
+                    'processing': {
+                        'blur_kernel': (7, 7),
+                        'canny_thresholds': (50, 150),
+                        'min_contour_area': 800,
+                        'bubble_fill_threshold': 0.35
+                    }
+                }
+            }
+            self.current_template = None
+            self.debug_mode = False
+
+        def connect_db(self):
+            return mysql.connector.connect(
+                host=os.getenv('DB_HOST', 'localhost'),
+                user=os.getenv('DB_USER', 'root'),
+                password=os.getenv('DB_PASSWORD', ''),
+                database=os.getenv('DB_NAME', 'bubble_sheet_db')
+            )
+
+        def identify_template(self, image):
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            results = reader.readtext(gray, detail=0)
+
+            for text in results:
+                for template_name, config in self.templates.items():
+                    if config['identifier'] in text:
+                        self.current_template = template_name
+                        return template_name
+
+            return self.detect_template_by_features(image)
+
+        def detect_template_by_features(self, image):
+            height, width = image.shape[:2]
+            id_roi = image[int(height * 0.12):int(height * 0.18), int(width * 0.2):int(width * 0.8)]
+            id_text = ' '.join(reader.readtext(id_roi, detail=0)).strip()
+
+            if "STUDENT ID" in id_text:
+                self.current_template = 'template1'
+            else:
+                self.current_template = 'template2'
+
+            return self.current_template
+
+        def preprocess_image(self, image):
+            config = self.templates[self.current_template]['processing']
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(gray, config['blur_kernel'], 0)
+            edged = cv2.Canny(blurred, *config['canny_thresholds'])
+
+            if self.debug_mode:
+                cv2.imshow("Edged", edged)
+                cv2.waitKey(0)
+
+            return edged
+
+        def find_sheet_corners(self, image):
+            edged = self.preprocess_image(image)
+            cnts = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cnts = imutils_contours.grab_contours(cnts)
+
+            if not cnts:
+                return None
+
+            cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
+
+            for c in cnts:
+                peri = cv2.arcLength(c, True)
+                approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+                if len(approx) == 4:
+                    if self.debug_mode:
+                        debug_img = image.copy()
+                        cv2.drawContours(debug_img, [approx], -1, (0, 255, 0), 5)
+                        cv2.imshow("Contour", debug_img)
+                        cv2.waitKey(0)
+                    return approx
+
+            return None
+
+        def extract_student_info(self, warped_image):
+            config = self.templates[self.current_template]
+            height, width = warped_image.shape[:2]
+
+            name_cfg = config['name_field']
+            name_roi = warped_image[
+                       int(height * name_cfg['y_start']):int(height * name_cfg['y_end']),
+                       int(width * name_cfg['x_start']):int(width * name_cfg['x_end'])
+                       ]
+            name = ' '.join(reader.readtext(name_roi, detail=0)).strip()
+
+            student_id = None
+            if 'id_field' in config:
+                id_cfg = config['id_field']
+                id_roi = warped_image[
+                         int(height * id_cfg['y_start']):int(height * id_cfg['y_end']),
+                         int(width * id_cfg['x_start']):int(width * id_cfg['x_end'])
+                         ]
+                student_id = ' '.join(reader.readtext(id_roi, detail=0)).strip()
+
+            if self.debug_mode:
+                cv2.imshow("Name ROI", name_roi)
+                if student_id:
+                    cv2.imshow("ID ROI", id_roi)
+                cv2.waitKey(0)
+
+            return {
+                'name': name if name else 'Unknown',
+                'id': student_id
+            }
+
+        def grade_answers(self, warped_image, correct_answers):
+            config = self.templates[self.current_template]
+            answer_cfg = config['answer_fields']
+            processing_cfg = config['processing']
+
+            height, width = warped_image.shape[:2]
+            gray = cv2.cvtColor(warped_image, cv2.COLOR_BGR2GRAY)
+            thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+
+            if self.debug_mode:
+                cv2.imshow("Threshold", thresh)
+                cv2.waitKey(0)
+
+            answers = {}
+            bubble_height = int(height * answer_cfg['bubble_spacing'])
+            bubble_width = int(width * answer_cfg['bubble_width'])
+
+            for col in range(answer_cfg['columns']):
+                x_start = int(width * (0.2 + col * 0.4))
+
+                for q in range(answer_cfg['questions_per_column']):
+                    y_start = int(height * (answer_cfg['first_question_offset'] + q * answer_cfg['bubble_spacing']))
+
+                    question_num = col * answer_cfg['questions_per_column'] + q + 1
+                    if question_num > len(correct_answers):
+                        continue
+
+                    bubbles = {}
+                    for i, choice in enumerate(answer_cfg['choices']):
+                        x = x_start + i * int(width * 0.08)
+                        bubble_roi = thresh[y_start:y_start + bubble_height, x:x + bubble_width]
+                        filled = np.sum(bubble_roi == 255) / (bubble_roi.size)
+                        bubbles[choice] = filled > processing_cfg['bubble_fill_threshold']
+
+                        if self.debug_mode:
+                            debug_img = warped_image.copy()
+                            cv2.rectangle(debug_img, (x, y_start), (x + bubble_width, y_start + bubble_height), (0, 255, 0), 2)
+                            cv2.imshow(f"Q{question_num} {choice}", bubble_roi)
+                            cv2.waitKey(100)
+
+                    filled_bubbles = [k for k, v in bubbles.items() if v]
+                    if len(filled_bubbles) == 1:
+                        answers[str(question_num)] = filled_bubbles[0]
+                    else:
+                        answers[str(question_num)] = None
+
+            score = sum(1 for q, a in answers.items() if a == correct_answers.get(q))
+            return answers, score
+
+        def process_sheet(self, image_path):
+            image = cv2.imread(image_path)
+            if image is None:
+                return None, "Could not read image"
+
+            template_name = self.identify_template(image)
+            if not template_name:
+                return None, "Could not identify answer sheet template"
+
+            corners = self.find_sheet_corners(image)
+            if corners is None:
+                return None, "Could not detect answer sheet boundaries"
+
+            warped = four_point_transform(image, corners.reshape(4, 2))
+
+            if self.debug_mode:
+                cv2.imshow("Warped", warped)
+                cv2.waitKey(0)
+
+            correct_answers = self.get_correct_answers()
+            if not correct_answers:
+                return None, "No answer key found"
+
+            student_info = self.extract_student_info(warped)
+            answers, score = self.grade_answers(warped, correct_answers)
+
+            return {
+                'success': True,
+                'template': template_name,
+                'student': student_info,
+                'score': {
+                    'correct': score,
+                    'total': len(correct_answers),
+                    'percentage': round(score / len(correct_answers) * 100, 1) if len(correct_answers) > 0 else 0
+                },
+                'answers': answers,
+                'correct_answers': correct_answers
+            }, None
+
+        def get_correct_answers(self):
+            try:
+                conn = self.connect_db()
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute("SELECT question_id, correct_answer FROM questions ORDER BY question_id")
+                return {str(row['question_id']): row['correct_answer'] for row in cursor.fetchall()}
+            except Exception as e:
+                print(f"Database error: {e}")
+                return {}
+            finally:
+                if 'conn' in locals() and conn.is_connected():
+                    conn.close()
+
+        def convert_pdf_to_images(self, pdf_path):
+            """Convert PDF to images with Poppler fallback to PyMuPDF."""
+            try:
+                # Attempt with Poppler first
+                poppler_path = r"C:\poppler-25.04.0\bin"  # UPDATE THIS PATH
+                images = convert_from_path(
+                    pdf_path,
+                    dpi=300,
+                    poppler_path=poppler_path
+                )
+                image_paths = []
+                for i, image in enumerate(images):
+                    image_path = os.path.join(
+                        app.config['UPLOAD_FOLDER'],
+                        f"page_{i}_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+                    )
+                    image.save(image_path, 'PNG')
+                    image_paths.append(image_path)
+                return image_paths
+            except Exception as e:
+                print(f"Poppler failed, falling back to PyMuPDF: {e}")
+                try:
+                    # PyMuPDF fallback
+                    doc = fitz.open(pdf_path)
+                    image_paths = []
+                    for i, page in enumerate(doc):
+                        pix = page.get_pixmap(dpi=300)
+                        image_path = os.path.join(
+                            app.config['UPLOAD_FOLDER'],
+                            f"page_{i}_{datetime.now().strftime('%Y%m%d%H%M%S')}.png"
+                        )
+                        pix.save(image_path)
+                        image_paths.append(image_path)
+                    return image_paths
+                except Exception as e:
+                    print(f"PyMuPDF also failed: {e}")
+                    raise Exception("Failed to convert PDF using both Poppler and PyMuPDF")
+
+    scanner = BubbleSheetScanner()
+
+    def allowed_file(filename):
+        return '.' in filename and \
+            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+    @app.route('/')
+    def index():
+        return render_template('index.html')
+
+    @app.route('/scan', methods=['POST'])
+    def scan_sheet():
+        if 'file' not in request.files:
+            return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'No file selected'}), 400
+
+        if not allowed_file(file.filename):
+            return jsonify({'success': False, 'error': 'Invalid file type'}), 400
+
+        try:
+            if file.filename.lower().endswith('.pdf'):
+                pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(file.filename))
+                file.save(pdf_path)
+                image_paths = scanner.convert_pdf_to_images(pdf_path)
+
+                results = []
+                for image_path in image_paths:
+                    result, error = scanner.process_sheet(image_path)
+                    if error:
+                        return jsonify({'success': False, 'error': error}), 400
+                    results.append(result)
+
+                return jsonify({'success': True, 'results': results})
+            else:
+                filename = secure_filename(f"scan_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg")
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+
+                result, error = scanner.process_sheet(filepath)
+                if error:
+                    return jsonify({'success': False, 'error': error}), 400
+
+                return jsonify(result)
+        except Exception as e:
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    if __name__ == '__main__':
+        app.run(host='0.0.0.0', port=5000, ssl_context='adhoc')

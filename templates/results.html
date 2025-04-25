@@ -1,0 +1,309 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="results-container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-poll me-2"></i>Scan Results</h2>
+        <div>
+            <a href="{{ url_for('download_result', scan_id=scan.id) }}" class="btn btn-outline-success me-2">
+                <i class="fas fa-download me-2"></i>Download PDF
+            </a>
+            <a href="{{ url_for('index') }}" class="btn btn-outline-info">
+                <i class="fas fa-arrow-left me-2"></i>Back to Home
+            </a>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header bg-info text-white">
+            <h4 class="mb-0">Student Information</h4>
+        </div>
+        <div class="card-body">
+            <div class="student-info">
+                <h3>{{ scan.student.name }}</h3>
+                <p><strong>Student Name:</strong> {{ scan.student.name }}</p>
+                {% if scan.student.student_id %}
+                <p><strong>Student ID:</strong> {{ scan.student.student_id }}</p>
+                {% endif %}
+                <p><strong>Template Used:</strong> {{ scan.template_used }}</p>
+                <p><strong>Scan Date:</strong> {{ scan.scan_date.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+            </div>
+
+            <div class="score-display">
+                <div class="score-circle 
+                    {% if scan.percentage >= 80 %}high
+                    {% elif scan.percentage >= 60 %}medium
+                    {% else %}low{% endif %}">
+                    <div class="score-number">{{ scan.percentage }}%</div>
+                    <div class="score-label">Score</div>
+                </div>
+
+                <div class="d-flex flex-column align-items-center">
+                    <h4>{{ scan.score }} / {{ scan.total_questions }}</h4>
+                    <p>Correct Answers</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Answers Analysis</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between mb-3">
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-outline-secondary active" id="showAllBtn">All</button>
+                            <button type="button" class="btn btn-outline-secondary" id="showCorrectBtn">Correct</button>
+                            <button type="button" class="btn btn-outline-secondary" id="showIncorrectBtn">Incorrect</button>
+                        </div>
+
+                        <div class="input-group" style="width: 200px;">
+                            <input type="text" class="form-control" placeholder="Search questions..." id="searchQuestions">
+                            <button class="btn btn-outline-secondary" type="button" id="searchBtn">
+                                <i class="fas fa-search"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-bordered answer-table" id="answersTable">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Selected</th>
+                                    <th>Correct</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for answer in answers %}
+                                <tr class="{% if answer.is_correct %}table-success correct-row{% else %}table-danger incorrect-row{% endif %}">
+                                    <td>{{ answer.question_number }}</td>
+                                    <td>{{ answer.selected_answer or '—' }}</td>
+                                    <td>{{ answer.correct_answer }}</td>
+                                    <td>
+                                        {% if answer.is_correct %}
+                                        <i class="fas fa-check-circle text-success"></i>
+                                        {% else %}
+                                        <i class="fas fa-times-circle text-danger"></i>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <nav>
+                        <ul class="pagination justify-content-center" id="answersPagination">
+                            <!-- Pagination will be generated with JavaScript -->
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0">Results Visualization</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="resultsChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize pagination for answer table
+        const itemsPerPage = 20;
+        const answersTable = document.getElementById('answersTable');
+        const rows = answersTable.querySelectorAll('tbody tr');
+        const paginationContainer = document.getElementById('answersPagination');
+
+        // Initialize pagination
+        function setupPagination() {
+            const pageCount = Math.ceil(rows.length / itemsPerPage);
+            paginationContainer.innerHTML = '';
+
+            // Only show pagination if we have more than one page
+            if (pageCount <= 1) {
+                return;
+            }
+
+            // Previous button
+            const prevLi = document.createElement('li');
+            prevLi.className = 'page-item';
+            prevLi.innerHTML = '<a class="page-link" href="#" aria-label="Previous"><span aria-hidden="true">&laquo;</span></a>';
+            prevLi.addEventListener('click', function(e) {
+                e.preventDefault();
+                const activePage = document.querySelector('.pagination .active');
+                if (activePage && activePage.previousElementSibling && !activePage.previousElementSibling.classList.contains('disabled')) {
+                    activePage.previousElementSibling.querySelector('a').click();
+                }
+            });
+            paginationContainer.appendChild(prevLi);
+
+            // Page numbers
+            for (let i = 1; i <= pageCount; i++) {
+                const li = document.createElement('li');
+                li.className = 'page-item' + (i === 1 ? ' active' : '');
+                li.innerHTML = `<a class="page-link" href="#">${i}</a>`;
+                li.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showPage(i);
+                    document.querySelectorAll('.pagination .page-item').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                });
+                paginationContainer.appendChild(li);
+            }
+
+            // Next button
+            const nextLi = document.createElement('li');
+            nextLi.className = 'page-item';
+            nextLi.innerHTML = '<a class="page-link" href="#" aria-label="Next"><span aria-hidden="true">&raquo;</span></a>';
+            nextLi.addEventListener('click', function(e) {
+                e.preventDefault();
+                const activePage = document.querySelector('.pagination .active');
+                if (activePage && activePage.nextElementSibling && !activePage.nextElementSibling.classList.contains('disabled')) {
+                    activePage.nextElementSibling.querySelector('a').click();
+                }
+            });
+            paginationContainer.appendChild(nextLi);
+        }
+
+        // Show specific page
+        function showPage(pageNum) {
+            const start = (pageNum - 1) * itemsPerPage;
+            const end = start + itemsPerPage;
+
+            rows.forEach((row, index) => {
+                if (row.style.display !== 'none' && !row.dataset.filtered) {
+                    if (index >= start && index < end) {
+                        row.style.display = '';
+                    } else {
+                        row.style.display = 'none';
+                    }
+                }
+            });
+        }
+
+        // Filter buttons functionality
+        document.getElementById('showAllBtn').addEventListener('click', function() {
+            document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
+            this.classList.add('active');
+            rows.forEach(row => {
+                row.style.display = '';
+                row.dataset.filtered = false;
+            });
+            setupPagination();
+            showPage(1);
+        });
+
+        document.getElementById('showCorrectBtn').addEventListener('click', function() {
+            document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
+            this.classList.add('active');
+            rows.forEach(row => {
+                if (row.classList.contains('correct-row')) {
+                    row.style.display = '';
+                    row.dataset.filtered = false;
+                } else {
+                    row.style.display = 'none';
+                    row.dataset.filtered = true;
+                }
+            });
+            setupPagination();
+            showPage(1);
+        });
+
+        document.getElementById('showIncorrectBtn').addEventListener('click', function() {
+            document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
+            this.classList.add('active');
+            rows.forEach(row => {
+                if (row.classList.contains('incorrect-row')) {
+                    row.style.display = '';
+                    row.dataset.filtered = false;
+                } else {
+                    row.style.display = 'none';
+                    row.dataset.filtered = true;
+                }
+            });
+            setupPagination();
+            showPage(1);
+        });
+
+        // Search functionality
+        document.getElementById('searchBtn').addEventListener('click', function() {
+            const searchTerm = document.getElementById('searchQuestions').value.toLowerCase();
+            if (!searchTerm) {
+                document.getElementById('showAllBtn').click();
+                return;
+            }
+
+            rows.forEach(row => {
+                const questionNum = row.cells[0].textContent;
+                if (questionNum.includes(searchTerm)) {
+                    row.style.display = '';
+                    row.dataset.filtered = false;
+                } else {
+                    row.style.display = 'none';
+                    row.dataset.filtered = true;
+                }
+            });
+            setupPagination();
+            showPage(1);
+        });
+
+        // Initialize chart
+        const ctx = document.getElementById('resultsChart').getContext('2d');
+        const correctCount = document.querySelectorAll('.correct-row').length;
+        const incorrectCount = document.querySelectorAll('.incorrect-row').length;
+
+        new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: ['Correct', 'Incorrect'],
+                datasets: [{
+                    data: [correctCount, incorrectCount],
+                    backgroundColor: ['rgba(75, 192, 192, 0.7)', 'rgba(255, 99, 132, 0.7)'],
+                    borderColor: ['rgba(75, 192, 192, 1)', 'rgba(255, 99, 132, 1)'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.raw;
+                                const total = correctCount + incorrectCount;
+                                const percentage = Math.round((value / total) * 100);
+                                return `${label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Initialize pagination
+        setupPagination();
+        showPage(1);
+    });
+</script>
+{% endblock %}
+{% endblock %}
